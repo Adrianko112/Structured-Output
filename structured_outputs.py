@@ -15,97 +15,112 @@ client = OpenAI()
 MODEL = "gpt-4o"
 
 
-
-math_tutor_prompt = """
-    Sei un tutor di matematica.
-    Ti verrà fornito un problema matematico,
-    e il tuo obiettivo sarà quello di fornire una soluzione
-    passo dopo passo, insieme a una risposta finale.
-    Per ogni passaggio, fornisci l'output come equazione
-    e usa il campo explanation per spiegare il ragionamento.
+review_prompt = """
+    Ti verrà fornita la recensione di un prodotto scritta da un cliente.
+    Il tuo obiettivo è analizzarla seguendo lo schema fornito.
+    - product: nome del prodotto recensito
+    - sentiment: giudizio generale della recensione
+    - rating: voto da 1 a 5 che secondo te il cliente darebbe
+    - pros: elenco dei punti di forza citati
+    - cons: elenco dei difetti citati
+    - summary: riassunto della recensione in una frase
 """
 
 
-class MathReasoning(BaseModel):
-    class Step(BaseModel):
-        explanation: str
-        output: str
-
-    steps: list[Step]
-    final_answer: str
+class Sentiment(str, Enum):
+    positive = "positive"
+    neutral = "neutral"
+    negative = "negative"
 
 
-def get_math_solution(question):
+class ReviewAnalysis(BaseModel):
+    product: str
+    sentiment: Sentiment
+    rating: int
+    pros: list[str]
+    cons: list[str]
+    summary: str
+
+
+def analyze_review(text):
     completion = client.beta.chat.completions.parse(
         model=MODEL,
+        temperature=0.2,
         messages=[
-            {"role": "system", "content": dedent(math_tutor_prompt)},
-            {"role": "user", "content": question},
+            {"role": "system", "content": dedent(review_prompt)},
+            {"role": "user", "content": text},
         ],
-        response_format=MathReasoning,
+        response_format=ReviewAnalysis,
     )
     return completion.choices[0].message
 
 
 def esempio_1():
-    print("ESEMPIO 1: tutor di matematica\n")
-    message = get_math_solution("come posso risolvere 8x + 7 = -23")
+    print("ESEMPIO 1: analisi di recensioni\n")
+    reviews = [
+        "Ho comprato le cuffie Sonic X3 un mese fa. Il suono è fantastico e la batteria dura tutto il giorno, "
+        "però sono scomode dopo un'ora e il bluetooth ogni tanto si disconnette.",
+        "L'aspirapolvere Cleanix è un disastro: fa un rumore pazzesco, si è rotto dopo due settimane "
+        "e l'assistenza non risponde. Sconsigliato.",
+    ]
 
-    if message.refusal:
-        print("Richiesta rifiutata:", message.refusal)
-        return
+    for text in reviews:
+        message = analyze_review(text)
 
-    result = message.parsed
-    for i, step in enumerate(result.steps):
-        print(f"Step {i + 1}: {step.explanation}")
-        print(f"   {step.output}\n")
-    print("Risposta finale:", result.final_answer)
+        if message.refusal:
+            print("Richiesta rifiutata:", message.refusal)
+            continue
+
+        result = message.parsed
+        print(f"Prodotto: {result.product}")
+        print(f"Sentiment: {result.sentiment.value}")
+        print(f"Voto: {result.rating}/5")
+        print("Pro:")
+        for p in result.pros:
+            print(f"- {p}")
+        print("Contro:")
+        for c in result.cons:
+            print(f"- {c}")
+        print(f"Riassunto: {result.summary}\n")
 
 
-
-product_search_prompt = """
-    Sei un personal shopper, specializzato nel trovare l'abbinamento perfetto per un utente.
-    Ti viene fornito un input dell'utente e un contesto aggiuntivo,
-    come il sesso e la fascia d'età dell'utente e la stagione.
-    Hai a disposizione uno strumento per cercare in un database gli abiti
-    che corrispondono al profilo e alle preferenze dell'utente.
-
-    Ecco le categorie disponibili sul sito:
-    - shoes: boots, sneakers, sandals
-    - jackets: winter coats, cardigans, parkas, rain jackets
-    - tops: shirts, blouses, t-shirts, crop tops, sweaters
-    - bottoms: jeans, skirts, trousers, joggers
-
-    Usa nomi di colori comuni.
+restaurant_prompt = """
+    Sei un assistente per la prenotazione di ristoranti.
+    Ti viene fornita la richiesta di un utente e un contesto aggiuntivo.
+    Hai a disposizione uno strumento per cercare un ristorante in un database.
+    In base alla richiesta e al contesto, determina i valori più probabili
+    dei parametri da usare per la ricerca.
 """
 
 
-class Category(str, Enum):
-    shoes = "shoes"
-    jackets = "jackets"
-    tops = "tops"
-    bottoms = "bottoms"
+class Cuisine(str, Enum):
+    italian = "italian"
+    japanese = "japanese"
+    mexican = "mexican"
+    indian = "indian"
+    vegetarian = "vegetarian"
 
 
-class ProductSearchParameters(BaseModel):
-    category: Category
-    subcategory: str
-    color: str
+class RestaurantSearchParameters(BaseModel):
+    city: str
+    cuisine: Cuisine
+    people: int
+    time: str
 
 
-def get_product_search(user_input, context):
+def search_restaurant(user_input, context):
     response = client.chat.completions.create(
         model=MODEL,
         temperature=0,
         messages=[
-            {"role": "system", "content": dedent(product_search_prompt)},
+            {"role": "system", "content": dedent(restaurant_prompt)},
             {"role": "user", "content": f"CONTEXT: {context}\n USER INPUT: {user_input}"},
         ],
         tools=[
             openai.pydantic_function_tool(
-                ProductSearchParameters,
-                name="product_search",
-                description="Search for a match in the product database",
+                RestaurantSearchParameters,
+                name="restaurant_search",
+                description="Search a restaurant in the database",
             )
         ],
     )
@@ -113,24 +128,24 @@ def get_product_search(user_input, context):
 
 
 def esempio_2():
-    print("\nESEMPIO 2: ricerca prodotti\n")
+    print("ESEMPIO 2: ricerca ristoranti\n")
     richieste = [
         {
-            "user_input": "Quest'estate andrò a fare un percorso in Scozia. Ci sarà molta pioggia. Aiutami a trovare qualcosa.",
-            "context": "Gender: male, Age group: 30-40",
+            "user_input": "Vorrei portare i miei genitori a mangiare il sushi sabato sera verso le 20.",
+            "context": "City: Milano, Group: 3 people",
         },
         {
-            "user_input": "Sto cercando di completare un look rock. Mi mancano le scarpe. Qualche suggerimento?",
-            "context": "Gender: female, Age group: 20-30",
+            "user_input": "Cerco un posto per una cena di compleanno con gli amici, ci piacciono i tacos.",
+            "context": "City: Roma, Group: 8 people, Time: 21:00",
         },
         {
-            "user_input": "Puoi aiutarmi a trovare un vestito per una festa a tema Barbie a luglio?",
-            "context": "Gender: female, Age group: 20-30",
+            "user_input": "Pranzo di lavoro domani, uno dei colleghi non mangia carne.",
+            "context": "City: Torino, Group: 4 people, Time: 13:00",
         },
     ]
 
     for r in richieste:
-        tool_calls = get_product_search(r["user_input"], r["context"])
+        tool_calls = search_restaurant(r["user_input"], r["context"])
         args = json.loads(tool_calls[0].function.arguments)
         print(f"Input: {r['user_input']}")
         print(f"Context: {r['context']}")
